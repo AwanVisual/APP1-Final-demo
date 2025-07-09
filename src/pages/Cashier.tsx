@@ -26,6 +26,7 @@ import { useToast } from "@/hooks/use-toast";
 import { formatCurrency } from "@/lib/utils";
 import { useAuth } from "@/hooks/useAuth";
 import PreCheckoutDialog from "@/components/PreCheckoutDialog";
+import { downloadInvoicePDF, printInvoicePDF } from "@/lib/pdfGenerator";
 
 interface CartItem {
   product: any;
@@ -336,195 +337,15 @@ const Cashier = () => {
   });
 
   const generateReceipt = (sale: any) => {
-    const logoUrl = settings?.company_logo ? settings.company_logo : "";
-    const storeName = settings?.store_name || "";
-    const storeAddress = settings?.store_address || "";
-    const storePhone = settings?.store_phone || "";
-    const storeEmail = settings?.store_email || "";
-    const storeWebsite = settings?.store_website || "";
-    const receiptHeader = settings?.receipt_header || "";
-    const receiptFooter = settings?.receipt_footer || "";
-
-    // Get sales name
-    const salesName = selectedCashier || user?.email || "Unknown";
-
-    // Calculate detailed pricing totals for receipt using individual item discounts
-    const detailedTotals = cart.reduce(
-      (totals, item) => {
-        const itemCalc = calculateDetailedPricing(item);
-        return {
-          amount: totals.amount + itemCalc.amount,
-          discount: totals.discount + itemCalc.discount,
-          dppFaktur: totals.dppFaktur + itemCalc.dppFaktur,
-          ppn11: totals.ppn11 + itemCalc.ppn11,
-        };
-      },
-      { amount: 0, discount: 0, dppFaktur: 0, ppn11: 0 },
+    // Generate PDF invoice instead of HTML
+    printInvoicePDF(
+      sale,
+      cart,
+      settings || {},
+      receiptConfig,
+      selectedCashier,
+      user?.email
     );
-
-    const receiptContent = `
-      <div style="font-family: Arial, sans-serif; max-width: 800px; width: 100%; margin: 0 auto; padding: 20px; min-height: 600px;">
-        <div style="display: flex; justify-content: space-between; align-items: flex-start; border-bottom: 2px solid #000; padding-bottom: 8px; margin-bottom: 12px;">
-          <div style="flex: 1;">
-            <div style="display: flex; align-items: center; gap: 20px;">
-              ${logoUrl ? `<img src="${logoUrl}" alt="Logo" style="max-height: 80px;" />` : ""}
-            </div>
-          </div>
-          <div style="text-align: right;">
-            <h2 style="margin: 0; font-size: 32px; font-weight: bold;">INVOICE</h2>
-            <div style="margin-top: 15px;">
-              ${storeName ? `<p style="margin: 5px 0; font-size: 16px;">${storeName}</p>` : ""}
-              ${storeAddress ? `<p style="margin: 5px 0; font-size: 14px;">${storeAddress}</p>` : ""}
-              ${storePhone ? `<p style="margin: 5px 0; font-size: 14px;">${storePhone}</p>` : ""}
-              ${storeEmail ? `<p style="margin: 5px 0; font-size: 14px;">${storeEmail}</p>` : ""}
-              ${storeWebsite ? `<p style="margin: 5px 0; font-size: 14px;">${storeWebsite}</p>` : ""}
-            </div>
-          </div>
-        </div>
-
-        <div style="margin-bottom: 20px;">
-          <p style="margin: 5px 0; font-size: 16px;"><strong>NO INVOICE:</strong> ${sale.sale_number}</p>
-          <p style="margin: 5px 0; font-size: 16px;"><strong>TANGGAL:</strong> ${new Date(sale.created_at).toLocaleDateString("id-ID")}</p>
-          ${sale.customer_name ? `<p style="margin: 5px 0; font-size: 16px;"><strong>KEPADA:</strong> ${sale.customer_name}</p>` : ""}
-          <p style="margin: 5px 0; font-size: 16px;"><strong>NAMA SALES:</strong> ${salesName}</p>
-        </div>
-
-        <table style="width: 100%; border-collapse: collapse; margin-bottom: 30px; font-size: 14px;">
-          <thead>
-            <tr style="background-color: #f8f9fa; border-bottom: 2px solid #000;">
-              <th style="text-align: left; padding: 12px; font-size: 16px; font-weight: bold;">KETERANGAN</th>
-              <th style="text-align: center; padding: 12px; font-size: 16px; font-weight: bold;">QTY</th>
-              <th style="text-align: right; padding: 12px; font-size: 16px; font-weight: bold;">HARGA</th>
-              <th style="text-align: right; padding: 12px; font-size: 16px; font-weight: bold;">DISCOUNT</th>
-              <th style="text-align: right; padding: 12px; font-size: 16px; font-weight: bold;">TOTAL</th>
-            </tr>
-          </thead>
-          <tbody>
-            ${cart
-              .map(
-                (item) => {
-                  const itemCalc = calculateDetailedPricing(item);
-                  return `
-              <tr style="border-bottom: 1px solid #ddd;">
-                <td style="padding: 10px; font-size: 14px;">${item.product.name}</td>
-                <td style="text-align: center; padding: 10px; font-size: 14px;">${item.quantity}</td>
-                <td style="text-align: right; padding: 10px; font-size: 14px;">${formatCurrency(Number(item.product.price))}</td>
-                <td style="text-align: right; padding: 10px; font-size: 14px;">
-                  ${item.customDiscount > 0 ? `${item.customDiscount}%` : '-'}
-                  ${item.customDiscount > 0 ? `<br/><small style="color: #666;">-${formatCurrency(itemCalc.discount)}</small>` : ''}
-                </td>
-                <td style="text-align: right; padding: 10px; font-size: 14px;">${formatCurrency(itemCalc.finalItemTotal)}</td>
-              </tr>
-            `;
-                }
-              )
-              .join("")}
-          </tbody>
-        </table>
-
-        <div style="display: flex; justify-content: space-between; margin-top: 30px;">
-          <div style="flex: 1; max-width: 300px;">
-            <div style="background-color: #f8f9fa; padding: 15px; border-radius: 8px; margin-bottom: 20px;">
-              <h4 style="margin: 0 0 10px 0; color: #d9534f;">CATATAN PEMBAYARAN:</h4>
-              <p style="margin: 0; font-size: 12px; line-height: 1.4;">
-                ${settings?.payment_note_line1 || `Harga BCA : ${formatCurrency(Math.round(detailedTotals.dppFaktur / cart.length))}/PUTRA INDRAWAN`}<br/>
-                ${settings?.payment_note_line2 || "No. Rekening: 7840656905"}
-              </p>
-            </div>
-          </div>
-
-          <div style="min-width: 300px; border-left: 2px solid #000; padding-left: 20px;">
-            ${
-              receiptConfig.showAmount
-                ? `
-            <div style="display: flex; justify-content: space-between; margin-bottom: 8px; font-size: 14px;">
-              <span>SUB TOTAL:</span>
-              <span>${formatCurrency(detailedTotals.amount)}</span>
-            </div>
-            `
-                : ""
-            }
-            ${
-              detailedTotals.discount > 0
-                ? `
-            <div style="display: flex; justify-content: space-between; margin-bottom: 8px; font-size: 14px;">
-              <span>Total Discount:</span>
-              <span>-${formatCurrency(detailedTotals.discount)}</span>
-            </div>
-            `
-                : ""
-            }
-            ${
-              receiptConfig.showDppFaktur
-                ? `
-            <div style="display: flex; justify-content: space-between; margin-bottom: 8px; font-size: 14px;">
-              <span>DPP Faktur:</span>
-              <span>${formatCurrency(detailedTotals.dppFaktur)}</span>
-            </div>
-            `
-                : ""
-            }
-            ${
-              receiptConfig.showPpn11
-                ? `
-            <div style="display: flex; justify-content: space-between; margin-bottom: 8px; font-size: 14px;">
-              <span>PPN 11%:</span>
-              <span>${formatCurrency(detailedTotals.ppn11)}</span>
-            </div>
-            `
-                : ""
-            }
-            <div style="border-top: 1px solid #000; margin: 15px 0; padding-top: 15px;">
-              <div style="display: flex; justify-content: space-between; margin-bottom: 10px; font-weight: bold; font-size: 18px;">
-                <span>TOTAL:</span>
-                <span>${formatCurrency(total)}</span>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        <div style="margin-top: 40px; text-align: right;">
-          <p style="margin: 0; font-size: 16px; font-weight: bold;"></p>
-        </div>
-
-        ${
-          receiptHeader || receiptFooter
-            ? `
-        <div style="text-align: center; margin-top: 30px; border-top: 1px solid #000; padding-top: 15px;">
-          ${receiptHeader ? `<p style="font-size: 14px; margin: 5px 0;">${receiptHeader}</p>` : ""}
-          ${receiptFooter ? `<p style="font-size: 14px; margin: 5px 0;">${receiptFooter}</p>` : ""}
-        </div>
-        `
-            : ""
-        }
-      </div>
-    `;
-
-    const printWindow = window.open("", "_blank");
-    if (printWindow) {
-      printWindow.document.write(`
-        <html>
-          <head>
-            <title>Invoice - ${sale.sale_number}</title>
-            <style>
-              @page { 
-                size: A4 landscape; 
-                margin: 15mm; 
-              }
-              @media print {
-                body { 
-                  margin: 0; 
-                  font-size: 12px; 
-                }
-              }
-            </style>
-          </head>
-          <body>${receiptContent}</body>
-        </html>
-      `);
-      printWindow.document.close();
-      printWindow.print();
-    }
   };
 
   return (
@@ -798,6 +619,38 @@ const Cashier = () => {
                         ? "Processing..."
                         : "Complete Sale"}
                     </Button>
+
+                    {cart.length > 0 && (
+                      <Button
+                        className="w-full"
+                        variant="outline"
+                        onClick={() => {
+                          // Create a mock sale object for preview
+                          const mockSale = {
+                            id: 'preview',
+                            sale_number: 'PREVIEW-' + Date.now(),
+                            created_at: new Date().toISOString(),
+                            customer_name: customerName || undefined,
+                            total_amount: total,
+                            payment_method: paymentMethod,
+                            payment_received: paymentReceived,
+                            change_amount: Math.max(0, paymentReceived - total),
+                            notes: selectedCashier ? `Sales: ${selectedCashier}` : undefined,
+                          };
+                          
+                          downloadInvoicePDF(
+                            mockSale,
+                            cart,
+                            settings || {},
+                            receiptConfig,
+                            selectedCashier,
+                            user?.email
+                          );
+                        }}
+                      >
+                        Download PDF Preview
+                      </Button>
+                    )}
                   </div>
                 </div>
               </>
